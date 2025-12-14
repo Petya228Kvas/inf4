@@ -1,245 +1,254 @@
-#include <stdio.h>    
-#include <stdbool.h> 
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#define BUFFER_SIZE 1000      // Максимальный размер входного буфера
+#define MAX_VARS 100          // Максимальное количество переменных
+#define MAX_VAR_LEN 50        // Максимальная длина имени переменной
 
-// --- Константы ---
-#define MAX_INPUT 1000 // Максимальный размер входного буфера для Python-кода
-#define MAX_BODY 500   // Максимальный размер буфера для тела блока if
+// Глобальные переменные для хранения состояния программы
+char input[BUFFER_SIZE];      // Буфер для хранения всего входного текста
+int input_len = 0;            // Фактическая длина входного текста
 
-// --- Глобальные переменные ---
-char body_buf[MAX_BODY]; // Временный буфер для хранения сгенерированного C-кода тела блока if
-int body_len;            // Текущая длина данных в body_buf
+char variables[MAX_VARS][MAX_VAR_LEN];  // Массив для хранения имен объявленных переменных
+int var_count = 0;                      // Количество объявленных переменных
 
-void put_str(const char *s);                        // Выводит строку посимвольно с помощью putchar
-int skip_sp(const char *buf, int i);                // Пропускает пробелы, табы и переводы строк
-int get_ind(const char *buf, int i, int *ind_chars); // Определяет количество символов отступа
-int token(const char *buf, int i, char *token, int max_len); // Читает токен (ключевое слово/имя переменной)
+int in_condition_block = 0;   // Флаг: находимся ли внутри блока условия (if)
+int condition_indent = -1;    // Уровень отступа для текущего условия (-1 = нет активного условия)
+
+void add_variable(const char* name);     // Добавление переменной в список
+int is_variable(const char* name);       // Проверка, объявлена ли переменная
+void skip_spaces(int* pos);              // Пропуск пробелов в позиции
+int get_indentation(int pos);            // Получение уровня отступа строки
+int get_identifier(int* pos, char* buf); // Извлечение идентификатора (имени переменной)
+int is_string_literal(const char* str);  // Проверка, является ли строка строковым литералом
 
 int main() {
-    char py[MAX_INPUT]; // Буфер для хранения всего входного Python-кода
-    int char_count = 0; // Фактическое количество прочитанных символов
-    int c;              // Для чтения символов через getchar()
-
-    // 1 Чтение всего входного кода Python из stdin
-    while ((c = getchar()) != EOF && char_count < MAX_INPUT - 1) {
-        py[char_count++] = (char)c;
+    int c;
+    while ((c = getchar()) != EOF && input_len < BUFFER_SIZE - 1) {
+        input[input_len++] = c;
     }
-    py[char_count] = '\0'; // Завершаем строку
-
-    // 2 Вывод обязательной C-шапки
-    put_str("#include <stdio.h>\n");
-    put_str("\n");
-    put_str("int main() {\n");
+    input[input_len] = '\0';
     
-    // 3 Основной цикл парсинга
-    int i = 0;             // Текущий индекс в буфере py
-    char token_c[64];      // Буфер для хранения текущего токена (например if, print, x)
+    int line_start = 0;
     
-    while (i < char_count) {
-        // Пропускаем все пробельные символы и пустые строки перед началом новой команды
-        i = skip_sp(py, i);
-        if (py[i] == '\0') {
-            break; // Достигнут конец входного файла
-        }
-        
-        int line_start = i; // Начало текущей логической команды
-        
-        // Читаем первый токен (ключевое слово или имя переменной)
-        i = token(py, i, token_c, 64);
-        int token_end_idx = i; 
-
-        // Пропускаем пробелы после токена
-        while (py[i] == ' ' || py[i] == '\t') {
-            i++;
-        }
-        
-        //Обработка условного оператора if 
-        if (token_c[0] == 'i' && token_c[1] == 'f' && token_c[2] == '\0') {
-            put_str("    if (");
-            i = token_end_idx; // Начинаем чтение условия с конца if
-            
-            // Копируем условие (например, x > 0) до двоеточия
-            while (py[i] != ':' && py[i] != '\0') {
-                putchar(py[i]);
-                i++;
-            }
-            put_str(") {\n"); // Открываем блок C
-            
-            // Пропускаем двоеточие и все пробельные символы до начала тела блока
-            while (py[i] == ':' || py[i] == ' ' || py[i] == '\t' || py[i] == '\n' || py[i] == '\r') {
-                i++;
-            }
-            
-            int block_start_index = i;
-            int init_ind; // Сюда будет записан размер отступа первой строки тела
-            
-            // Определяем начальный отступ для сравнения
-            int body_start_index = get_ind(py, block_start_index, &init_ind);
-            
-            //Цикл сбора тела блока if
-            body_len = 0;
-            int current_line_start = body_start_index; // Индекс первого значащего символа в текущей строке
-            
-            while (i < char_count) {
-                // 1 Находим конец текущей строки в Python-коде
-                while (py[i] != '\n' && py[i] != '\r' && py[i] != '\0') {
-                    i++;
+    // Обработка входного текста построчно
+    for (int i = 0; i <= input_len; i++) {
+        if (i == input_len || input[i] == '\n') {
+            int line_end = i;
+            int line_indent = get_indentation(line_start);
+            int pos = line_start + line_indent;
+            if (condition_indent != -1 && line_indent <= condition_indent) {
+                for (int j = 0; j < condition_indent; j++) {
+                    putchar(' ');
                 }
+                printf("}\n"); 
+                condition_indent = -1;
+                in_condition_block = 0;
+            }
+            for (int j = 0; j < line_indent; j++) {
+                putchar(' ');
+            }
+            
+            // Если строка не пустая (не состоит только из отступов)
+            if (pos < line_end) {
+                char var_name[MAX_VAR_LEN];  // Буфер для имени переменной
                 
-                // 2 Копируем тело команды в буфер body_buf
-                // Добавляем отступ для C-кода (4 пробела)
-                body_buf[body_len++] = ' '; body_buf[body_len++] = ' ';
-                body_buf[body_len++] = ' '; body_buf[body_len++] = ' ';
-                
-                int j;
-                for (j = current_line_start; j < i; j++) {
-                    if (body_len < MAX_BODY - 2) {
-                        body_buf[body_len++] = py[j];
+                // Обработка оператора IF
+                if (strncmp(&input[pos], "if ", 3) == 0 || 
+                    (pos + 2 < line_end && strncmp(&input[pos], "if", 2) == 0 && isspace(input[pos+2]))) {
+                    
+                    // Преобразуем Python: if x > 0:  в C: if (x > 0) {
+                    printf("if (");
+                    pos += 2; 
+                    skip_spaces(&pos); 
+                    
+                    // Копируем условие до двоеточия
+                    while (pos < line_end && input[pos] != ':') {
+                        if (input[pos] == '#') break;
+                        putchar(input[pos++]);
+                    }
+                    printf(") {\n");
+                    
+                    condition_indent = line_indent; 
+                    in_condition_block = 1;        
+                }
+                // Обработка оператора PRINT
+                else if (strncmp(&input[pos], "print(", 6) == 0) {
+                    // Преобразуем Python: print(...) в C: printf(...)
+                    pos += 6; 
+                    skip_spaces(&pos); 
+                    printf("printf(\"");
+                    
+                    // Определяем тип аргумента для выбора правильного спецификатора формата
+                    if (pos < line_end && (input[pos] == '"' || input[pos] == '\'')) {
+                        printf("%%s\", ");
+                        while (pos < line_end && input[pos] != ')' && input[pos] != '\n') {
+                            if (input[pos] == '#') break;
+                            putchar(input[pos++]);
+                        }
+                    } else {
+                        char identifier[MAX_VAR_LEN];
+                        if (get_identifier(&pos, identifier)) {
+                            if (is_variable(identifier)) {
+                                // Если переменная объявлена ранее - предполагаем int, используем %d
+                                printf("%%d\", %s", identifier);
+                            } else {
+                                // Если не объявлена - предполагаем строку, используем %s
+                                printf("%%s\", %s", identifier);
+                            }
+                        } else {
+                            // Если не идентификатор, используем %s по умолчанию
+                            printf("%%s\", ");
+                            while (pos < line_end && input[pos] != ')' && input[pos] != '\n') {
+                                if (input[pos] == '#') break;
+                                putchar(input[pos++]);
+                            }
+                        }
+                    }
+                    printf(");\n"); 
+                    
+                    if (pos < line_end && input[pos] == ')') {
+                        pos++;
                     }
                 }
-                body_buf[body_len++] = ';'; // Добавляем обязательную точку с запятой C
-                body_buf[body_len++] = '\n';
-                
-                // 3 Пропускаем символы перевода строки до начала следующей
-                while (py[i] == '\n' || py[i] == '\r') {
-                    i++;
-                }
-                
-                // 4 Проверяем отступ следующей строки для определения конца блока
-                int next_ind;
-                int start_of_next_token = get_ind(py, i, &next_ind); // Получаем отступ и сдвигаем i
-                
-                // Если новый отступ меньше начального, блок if закончился
-                if (next_ind < init_ind && start_of_next_token < char_count) {
-                    i = start_of_next_token; // Возвращаем индекс на начало следующей команды
-                    break; 
-                }
-                
-                // Иначе, это новая строка тела блока
-                current_line_start = start_of_next_token; 
-            }
-            
-            // Завершаем буфер и выводим сгенерированное тело блока
-            body_buf[body_len] = '\0';
-            put_str(body_buf);
-            put_str("    }\n"); // Закрываем блок C
-            continue;
-        }
-
-
-        //Обработка вывода (print)
-        if (token_c[0] == 'p' && token_c[1] == 'r' && token_c[2] == 'i' && token_c[3] == 'n' && token_c[4] == 't' && token_c[5] == '\0') {
-            i = token_end_idx;
-            while (py[i] != '(' && py[i] != '\0') i++; // Ищем открывающую скобку
-            
-            if (py[i] == '(') {
-                i++; // Пропускаем '('
-                put_str("    printf(");
-                
-                if (py[i] == '"') {
-                    // Обработка строки: print("hello") -> printf("%s", "hello")
-                    put_str("\"%s\", ");
+                // Обработка присваивания (x = ...)
+                else if (get_identifier(&pos, var_name)) {
+                    skip_spaces(&pos); 
                     
-                    putchar(py[i]); i++; // Вывод первой кавычки
-                    while (py[i] != '"' && py[i] != '\0') { putchar(py[i]); i++; } // Вывод содержимого
-                    if (py[i] == '"') { putchar(py[i]); i++; } // Вывод закрывающей кавычки
-                } else {
-                    // Обработка переменной: print(x) -> printf("%d", x)
-                    put_str("\"%d\", ");
-                    // Копируем имя переменной
-                    while (py[i] != ')' && py[i] != '\n' && py[i] != '\r' && py[i] != '\0') { putchar(py[i]); i++; }
+                    if (pos < line_end && input[pos] == '=') {
+                        pos++;
+                        skip_spaces(&pos); 
+                        
+                        // Обработка ввода с клавиатуры: x = int(input())
+                        if (strncmp(&input[pos], "int(input())", 12) == 0) {
+                            pos += 12;
+                            // Определяем, нужно ли объявлять переменную
+                            if (!in_condition_block && !is_variable(var_name)) {
+                                // Если не в блоке условия и переменная не объявлена - объявляем
+                                printf("int %s;\n", var_name);
+                                add_variable(var_name);  // Добавляем в список переменных
+                                for (int j = 0; j < line_indent; j++) putchar(' ');
+                                printf("scanf(\"%%d\", &%s);\n", var_name);
+                            } else {
+                                printf("scanf(\"%%d\", &%s);\n", var_name);
+                                if (!is_variable(var_name)) {
+                                    add_variable(var_name);  // Добавляем в список
+                                }
+                            }
+                        } else {
+                            // Обработка обычного присваивания: x = 42 или x = a + 1
+                            if (!in_condition_block && !is_variable(var_name)) {
+                                // Если не в блоке условия и переменная не объявлена
+                                printf("int %s = ", var_name);  // Объявляем с инициализацией
+                                add_variable(var_name);
+                            } else {
+                                // Если в блоке условия или переменная уже объявлена
+                                printf("%s = ", var_name);
+                                if (!is_variable(var_name)) {
+                                    add_variable(var_name);
+                                }
+                            }
+                            
+                            // Копируем выражение после '=' до конца строки
+                            while (pos < line_end && input[pos] != '\n') {
+                                if (input[pos] == '#') break; 
+                                putchar(input[pos++]);
+                            }
+                            printf(";\n"); 
+                        }
+                    } else {
+                        // Если нет оператора присваивания, просто копируем строку
+                        while (pos < line_end) {
+                            putchar(input[pos++]);
+                        }
+                        printf("\n");
+                    }
                 }
-                put_str(");\n");
-            }
-            
-            // Пропускаем остаток строки до следующей команды
-            while (py[i] != '\n' && py[i] != '\r' && py[i] != '\0') {
-                i++;
-            }
-            continue;
-        }
-
-        //Обработка присваивания и ввода
-        
-        i = token_end_idx;
-        while (py[i] == ' ' || py[i] == '\t') i++; // Пропускаем пробелы до '='
-
-        if (py[i] == '=') {
-            i++; // Пропускаем '='
-            while (py[i] == ' ' || py[i] == '\t') i++; // Пропускаем пробелы после '='
-            
-            // Проверяем ввод: x = int(input()) -> scanf("%d", &x);
-            if (py[i] == 'i' && py[i+1] == 'n' && py[i+2] == 't' && py[i+3] == '(' &&
-                py[i+4] == 'i' && py[i+5] == 'n' && py[i+6] == 'p' && py[i+7] == 'u' && 
-                py[i+8] == 't' && py[i+9] == '(' && py[i+10] == ')') 
-            {
-                // Генерируем C-код для ввода
-                put_str("    // int "); put_str(token_c); put_str(";\n"); // Напоминание об объявлении
-                put_str("    scanf(\"%d\", &"); put_str(token_c); put_str(");\n");
-                i += 11; // Сдвигаем индекс после int(input())
+                // Обработка всех остальных строк (просто копируем)
+                else {
+                    while (pos < line_end) {
+                        putchar(input[pos++]);
+                    }
+                    printf("\n");
+                }
             } else {
-                 // Обычное присваивание: x = 10 -> x = 10;
-                put_str("    "); 
-                put_str(token_c);
-                put_str(" = ");
-
-                // Копируем выражение (правую часть) до конца строки
-                while (py[i] != '\n' && py[i] != '\r' && py[i] != '\0') {
-                    putchar(py[i]);
-                    i++;
-                }
-                put_str(";\n");
+                // Пустая строка (только отступы) - просто перенос строки
+                printf("\n");
             }
-            continue;
+            line_start = i + 1;
         }
-        
-        // Если команда не распознана, сдвигаем индекс, чтобы избежать зацикливания
-        i = line_start + 1; 
     }
-
-    put_str("    return 0;\n");
-    put_str("}\n");
-
+    
+    // Если после обработки всех строк осталось незакрытое условие, закрываем его
+    if (condition_indent != -1) {
+        for (int j = 0; j < condition_indent; j++) {
+            putchar(' ');
+        }
+        printf("}\n");
+    }
+    
     return 0;
 }
 
-
-
-// Выводит строку посимвольно с помощью putchar
-void put_str(const char *s) {
-    while (*s != '\0') {
-        putchar(*s);
-        s++;
+// Добавляет переменную в список объявленных переменных
+void add_variable(const char* name) {
+    // Проверяем, не добавлена ли переменная уже
+    for (int i = 0; i < var_count; i++) {
+        if (strcmp(variables[i], name) == 0) {
+            return;  // Переменная уже есть, не добавляем
+        }
+    }
+    // Добавляем новую переменную, если есть место
+    if (var_count < MAX_VARS) {
+        strncpy(variables[var_count], name, MAX_VAR_LEN - 1);
+        var_count++;
     }
 }
 
-// Пропускает пробелы, табы, переводы строк и возвращает индекс первого значащего символа
-int skip_sp(const char *buf, int i) {
-    while (buf[i] == ' ' || buf[i] == '\t' || buf[i] == '\n' || buf[i] == '\r') {
-        i++;
+// Проверяет, объявлена ли переменная с данным именем
+int is_variable(const char* name) {
+    for (int i = 0; i < var_count; i++) {
+        if (strcmp(variables[i], name) == 0) {
+            return 1;  // Переменная найдена
+        }
     }
-    return i;
+    return 0;  // Переменная не найдена
 }
 
-// Определяет текущий отступ (количество пробелов/табов)
-int get_ind(const char *buf, int i, int *ind_chars) {
-    *ind_chars = 0; // Сбрасываем счетчик отступа
-    while (buf[i] == ' ' || buf[i] == '\t') {
-        (*ind_chars)++; // Считаем символы отступа
-        i++;
+// Пропускает пробельные символы (но не переносы строк)
+void skip_spaces(int* pos) {
+    while (*pos < input_len && isspace(input[*pos]) && input[*pos] != '\n') {
+        (*pos)++;
     }
-    return i; // Возвращаем индекс первого не-отступа (начала команды)
 }
 
-// Читает токен (ключевое слово или имя переменной) до первого разделителя
-int token(const char *buf, int i, char *token, int max_len) {
-    int j = 0;
-    while (buf[i] != ' ' && buf[i] != '\t' && 
-           buf[i] != '=' && buf[i] != '>' && 
-           buf[i] != '<' && buf[i] != ':' && 
-           buf[i] != '(' && buf[i] != '\n' && buf[i] != '\r' && buf[i] != '\0' && j < max_len - 1) 
-    {
-        token[j++] = buf[i++];
+// Определяет уровень отступа строки (количество пробелов в начале)
+int get_indentation(int pos) {
+    int indent = 0;
+    while (pos < input_len && input[pos] == ' ') {
+        indent++;
+        pos++;
     }
-    token[j] = '\0'; // Завершаем токен
-    return i;
+    return indent;
+}
+
+// Извлекает идентификатор (имя переменной) из текущей позиции
+int get_identifier(int* pos, char* buf) {
+    int i = 0;
+    // Идентификатор должен начинаться с буквы или underscore
+    if (*pos < input_len && (isalpha(input[*pos]) || input[*pos] == '_')) {
+        buf[i++] = input[(*pos)++];
+        // Продолжаем, пока идут буквы, цифры или underscore
+        while (*pos < input_len && (isalnum(input[*pos]) || input[*pos] == '_')) {
+            buf[i++] = input[(*pos)++];
+        }
+        buf[i] = '\0';
+        return 1;    
+    }
+    return 0;  // Не удалось извлечь идентификатор
+}
+
+// Проверяет, является ли строка строковым литералом
+int is_string_literal(const char* str) {
+    return str[0] == '"' || str[0] == '\'';  // Начинается с кавычек
 }
