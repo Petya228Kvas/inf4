@@ -8,12 +8,11 @@
 // Глобальные переменные для хранения состояния программы
 char input[BUFFER_SIZE];      // Буфер для хранения всего входного текста
 int input_len = 0;            // Фактическая длина входного текста
-
 char variables[MAX_VARS][MAX_VAR_LEN];  // Массив для хранения имен объявленных переменных
 int var_count = 0;                      // Количество объявленных переменных
-
 int in_condition_block = 0;   // Флаг: находимся ли внутри блока условия (if)
 int condition_indent = -1;    // Уровень отступа для текущего условия (-1 = нет активного условия)
+
 
 void add_variable(const char* name);     // Добавление переменной в список
 int is_variable(const char* name);       // Проверка, объявлена ли переменная
@@ -22,15 +21,15 @@ int get_indentation(int pos);            // Получение уровня от
 int get_identifier(int* pos, char* buf); // Извлечение идентификатора (имени переменной)
 int is_string_literal(const char* str);  // Проверка, является ли строка строковым литералом
 
+
+
 int main() {
     int c;
     while ((c = getchar()) != EOF && input_len < BUFFER_SIZE - 1) {
         input[input_len++] = c;
     }
     input[input_len] = '\0';
-    
     int line_start = 0;
-    
     // Обработка входного текста построчно
     for (int i = 0; i <= input_len; i++) {
         if (i == input_len || input[i] == '\n') {
@@ -48,7 +47,6 @@ int main() {
             for (int j = 0; j < line_indent; j++) {
                 putchar(' ');
             }
-            
             // Если строка не пустая (не состоит только из отступов)
             if (pos < line_end) {
                 char var_name[MAX_VAR_LEN];  // Буфер для имени переменной
@@ -56,19 +54,16 @@ int main() {
                 // Обработка оператора IF
                 if (strncmp(&input[pos], "if ", 3) == 0 || 
                     (pos + 2 < line_end && strncmp(&input[pos], "if", 2) == 0 && isspace(input[pos+2]))) {
-                    
                     // Преобразуем Python: if x > 0:  в C: if (x > 0) {
                     printf("if (");
                     pos += 2; 
                     skip_spaces(&pos); 
-                    
                     // Копируем условие до двоеточия
                     while (pos < line_end && input[pos] != ':') {
                         if (input[pos] == '#') break;
                         putchar(input[pos++]);
                     }
                     printf(") {\n");
-                    
                     condition_indent = line_indent; 
                     in_condition_block = 1;        
                 }
@@ -78,7 +73,6 @@ int main() {
                     pos += 6; 
                     skip_spaces(&pos); 
                     printf("printf(\"");
-                    
                     // Определяем тип аргумента для выбора правильного спецификатора формата
                     if (pos < line_end && (input[pos] == '"' || input[pos] == '\'')) {
                         printf("%%s\", ");
@@ -114,11 +108,9 @@ int main() {
                 // Обработка присваивания (x = ...)
                 else if (get_identifier(&pos, var_name)) {
                     skip_spaces(&pos); 
-                    
                     if (pos < line_end && input[pos] == '=') {
                         pos++;
                         skip_spaces(&pos); 
-                        
                         // Обработка ввода с клавиатуры: x = int(input())
                         if (strncmp(&input[pos], "int(input())", 12) == 0) {
                             pos += 12;
@@ -187,8 +179,14 @@ int main() {
         printf("}\n");
     }
     
+
+
+
     return 0;
 }
+
+
+
 
 // Добавляет переменную в список объявленных переменных
 void add_variable(const char* name) {
@@ -205,6 +203,8 @@ void add_variable(const char* name) {
     }
 }
 
+
+
 // Проверяет, объявлена ли переменная с данным именем
 int is_variable(const char* name) {
     for (int i = 0; i < var_count; i++) {
@@ -215,12 +215,16 @@ int is_variable(const char* name) {
     return 0;  // Переменная не найдена
 }
 
+
+
+
 // Пропускает пробельные символы (но не переносы строк)
 void skip_spaces(int* pos) {
     while (*pos < input_len && isspace(input[*pos]) && input[*pos] != '\n') {
         (*pos)++;
     }
 }
+
 
 // Определяет уровень отступа строки (количество пробелов в начале)
 int get_indentation(int pos) {
@@ -247,6 +251,8 @@ int get_identifier(int* pos, char* buf) {
     }
     return 0;  // Не удалось извлечь идентификатор
 }
+
+
 
 // Проверяет, является ли строка строковым литералом
 int is_string_literal(const char* str) {
